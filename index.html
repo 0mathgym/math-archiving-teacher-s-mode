@@ -480,11 +480,27 @@
     }
 
     // ===== API =====
-    async function apiPost(body) {
-      const res = await fetch(DEFAULT_GAS_URL, {
-        method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body)
-      });
-      return res.json();
+    // 저장 작업이 몰려 서버가 잠깐 잠금 대기 중일 때 자동으로 몇 번 재시도
+    const TRANSIENT_RE = /혼잡|진행 중|잠시 바쁩|Lock|잠금/i;
+    async function apiPost(body, tries = 3) {
+      for (let attempt = 1; ; attempt++) {
+        let json;
+        try {
+          const res = await fetch(DEFAULT_GAS_URL, {
+            method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: JSON.stringify(body)
+          });
+          json = await res.json();
+        } catch (netErr) {
+          if (attempt >= tries) throw netErr;
+          await new Promise(r => setTimeout(r, attempt * 1500));
+          continue;
+        }
+        if (json && json.result === 'error' && TRANSIENT_RE.test(json.message || '') && attempt < tries) {
+          await new Promise(r => setTimeout(r, attempt * 2500));
+          continue;
+        }
+        return json;
+      }
     }
     // 토큰이 필요한 요청 공통 래퍼: 세션 만료 시 로그인 화면으로
     async function apiAuth(body) {
